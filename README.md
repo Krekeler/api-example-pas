@@ -1,2 +1,4 @@
-# api-example-pas
-Documentchain Delphi API Example
+# Documentchain RPC API
+How to use Documentchain in your application.
+
+Example code for Delphi
