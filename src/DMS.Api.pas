@@ -535,7 +535,8 @@ begin
   if LChange then begin
     LChangeAdr := Post('{"jsonrpc":"1.0","id":"DMSExposed","method":"getrawchangeaddress"}');
     LChangeAdr := GetResultFromJSON(LChangeAdr);
-    LChangeStr := Format('"%s":%s, ', [LChangeAdr, FloatToJson(LInputAmount - AFee)]);
+    LChangeStr := FloatToStrF(LInputAmount - AFee, ffFixed, 15, 8, TFormatSettings.Invariant);
+    LChangeStr := Format('"%s":%s, ', [LChangeAdr, LChangeStr]);
   end
   else
     LChangeStr := '';
