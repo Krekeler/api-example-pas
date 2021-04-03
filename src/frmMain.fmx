@@ -3,7 +3,7 @@ object FormMain: TFormMain
   Top = 0
   Caption = 'Documentchain API Example'
   ClientHeight = 464
-  ClientWidth = 614
+  ClientWidth = 695
   FormFactor.Width = 320
   FormFactor.Height = 480
   FormFactor.Devices = [Desktop]
@@ -282,7 +282,7 @@ object FormMain: TFormMain
         FileName = 'G:\Programm\Coin\Document Chain\Delphi-Example\header.png'
       end>
     Align = Top
-    Size.Width = 614.000000000000000000
+    Size.Width = 695.000000000000000000
     Size.Height = 129.000000000000000000
     Size.PlatformDefault = False
     WrapMode = Original
@@ -291,102 +291,138 @@ object FormMain: TFormMain
     Position.X = 32.000000000000000000
     Position.Y = 152.000000000000000000
     Size.Width = 433.000000000000000000
-    Size.Height = 73.000000000000000000
+    Size.Height = 113.000000000000000000
     Size.PlatformDefault = False
     Text = 'Documentchain'
-    TabOrder = 1
-    object rbTestnet: TRadioButton
+    TabOrder = 0
+    object rbTestnetWeb: TRadioButton
+      Hint = 
+        'Use the free testnet. No additional software is needed for WebAP' +
+        'I.'
       IsChecked = True
       Position.X = 32.000000000000000000
       Position.Y = 32.000000000000000000
+      Size.Width = 153.000000000000000000
+      Size.Height = 19.000000000000000000
+      Size.PlatformDefault = False
       TabOrder = 0
-      Text = 'Testnet'
+      Text = 'Testnet WebAPI'
     end
-    object rbMainnet: TRadioButton
+    object rbTestnetLocal: TRadioButton
+      Hint = 'Wallet "DMS Core" must be installed.'
       Position.X = 256.000000000000000000
       Position.Y = 32.000000000000000000
+      Size.Width = 153.000000000000000000
+      Size.Height = 19.000000000000000000
+      Size.PlatformDefault = False
       TabOrder = 1
-      Text = 'Mainnet'
+      Text = 'Testnet Local Wallet'
+    end
+    object rbMainnetWeb: TRadioButton
+      Hint = 
+        'No additional software is needed for WebAPI, but an account for ' +
+        'the mainnet is required. This option is usually used in a softwa' +
+        're at the customer'#39's site.'
+      Position.X = 32.000000000000000000
+      Position.Y = 72.000000000000000000
+      Size.Width = 137.000000000000000000
+      Size.Height = 19.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 2
+      Text = 'Mainnet WebAPI'
+    end
+    object rbMainnetLocal: TRadioButton
+      Hint = 'Wallet "DMS Core" must be installed.'
+      Position.X = 256.000000000000000000
+      Position.Y = 72.000000000000000000
+      Size.Width = 161.000000000000000000
+      Size.Height = 19.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 3
+      Text = 'Mainnet Local Wallet'
     end
   end
   object edFileName: TEdit
     Touch.InteractiveGestures = [LongTap, DoubleTap]
     Anchors = [akLeft, akTop, akRight]
-    TabOrder = 4
+    TabOrder = 1
     Position.X = 32.000000000000000000
-    Position.Y = 248.000000000000000000
-    Size.Width = 433.000000000000000000
+    Position.Y = 309.000000000000000000
+    Size.Width = 514.000000000000000000
     Size.Height = 22.000000000000000000
     Size.PlatformDefault = False
     TextPrompt = 'File name'
   end
   object btnStore: TButton
     Anchors = [akTop, akRight]
-    Position.X = 480.000000000000000000
-    Position.Y = 248.000000000000000000
+    Hint = 'Select a file and store the hashe(s)'
+    Position.X = 561.000000000000000000
+    Position.Y = 309.000000000000000000
     Size.Width = 113.000000000000000000
     Size.Height = 22.000000000000000000
     Size.PlatformDefault = False
-    TabOrder = 5
-    Text = 'Store'
+    TabOrder = 2
+    Text = 'Store Hashes'
     OnClick = btnStoreClick
   end
   object edTxid: TEdit
     Touch.InteractiveGestures = [LongTap, DoubleTap]
     Anchors = [akLeft, akTop, akRight]
-    TabOrder = 2
+    TabOrder = 3
     Position.X = 32.000000000000000000
-    Position.Y = 328.000000000000000000
-    Size.Width = 433.000000000000000000
+    Position.Y = 382.000000000000000000
+    Size.Width = 514.000000000000000000
     Size.Height = 22.000000000000000000
     Size.PlatformDefault = False
     TextPrompt = 'Transaction ID'
   end
   object btnRevision: TButton
     Anchors = [akTop, akRight]
-    Position.X = 480.000000000000000000
-    Position.Y = 328.000000000000000000
+    Hint = 'Verify that the file exists unchanged'
+    Position.X = 561.000000000000000000
+    Position.Y = 382.000000000000000000
     Size.Width = 113.000000000000000000
     Size.Height = 22.000000000000000000
     Size.PlatformDefault = False
-    TabOrder = 3
+    TabOrder = 4
     Text = 'Revision'
     OnClick = btnRevisionClick
   end
   object lblExample: TLabel
     Anchors = [akTop, akRight]
     StyledSettings = [Family, Size, FontColor]
-    Position.X = 508.000000000000000000
+    Position.X = 589.000000000000000000
     Position.Y = 88.000000000000000000
     Size.Width = 96.000000000000000000
     Size.Height = 17.000000000000000000
     Size.PlatformDefault = False
     TextSettings.Font.StyleExt = {00070000000000000004000000}
     Text = 'API Example'
-    TabOrder = 6
+    TabOrder = 5
   end
   object lblFileHash: TLabel
+    Anchors = [akLeft, akTop, akRight]
     Position.X = 32.000000000000000000
-    Position.Y = 272.000000000000000000
-    Size.Width = 433.000000000000000000
+    Position.Y = 333.000000000000000000
+    Size.Width = 642.000000000000000000
     Size.Height = 17.000000000000000000
     Size.PlatformDefault = False
-    TabOrder = 8
+    TabOrder = 7
   end
   object lblPleaseWait: TLabel
     Position.X = 32.000000000000000000
-    Position.Y = 310.000000000000000000
+    Position.Y = 364.000000000000000000
     Size.Width = 433.000000000000000000
     Size.Height = 17.000000000000000000
     Size.PlatformDefault = False
     Text = 'Please wait until the block is mined. Then press "Revision".'
     Visible = False
-    TabOrder = 7
+    TabOrder = 6
   end
   object OpenDlg: TOpenDialog
     Filter = 'All Files (*.*)|*.*'
     Options = [ofHideReadOnly, ofFileMustExist, ofEnableSizing]
     Left = 496
-    Top = 272
+    Top = 333
   end
 end

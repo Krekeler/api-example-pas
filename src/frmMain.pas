@@ -6,15 +6,15 @@ interface
 
 uses
   System.SysUtils, System.Types, System.UITypes, System.Classes, System.Variants,
-  FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs, FMX.Objects, FMX.StdCtrls, FMX.Controls.Presentation,
-  FMX.Edit;
+  FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Objects, FMX.StdCtrls, FMX.Controls.Presentation,
+  FMX.Edit, FMX.Dialogs;
 
 type
   TFormMain = class(TForm)
     Image1: TImage;
     gbChain: TGroupBox;
-    rbTestnet: TRadioButton;
-    rbMainnet: TRadioButton;
+    rbTestnetWeb: TRadioButton;
+    rbTestnetLocal: TRadioButton;
     edFileName: TEdit;
     btnStore: TButton;
     edTxid: TEdit;
@@ -23,15 +23,14 @@ type
     lblFileHash: TLabel;
     OpenDlg: TOpenDialog;
     lblPleaseWait: TLabel;
+    rbMainnetWeb: TRadioButton;
+    rbMainnetLocal: TRadioButton;
     procedure btnStoreClick(Sender: TObject);
     procedure btnRevisionClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
   private
-    RpcUser,
-    RpcPW: string;
-    function GetRpcUrl: string;
     function GetAttributeHash: string;
-    function GetFileHash: string;
+    function CheckConfiguration: boolean;
   public
   end;
 
@@ -40,36 +39,18 @@ var
 
 implementation
 
-uses System.IOUtils,
-   //Winapi.ActiveX, // CoCreateGUID
-     IdGlobal, IdHash, IdHashMessageDigest, // Indy hash functions
+uses System.IOUtils, System.Hash, FMX.DialogService.Async, FMX.DialogService.Sync,
      DMS.Api;
 
 {$R *.fmx}
 
 function GetGUID: string;
-var G: TGUID;
 begin
   { TODO : you can use the document GUID from your Document Management }
-
-  { to create a GUID on Windows (uses Winapi.ActiveX):
-  CoCreateGUID(G);
-  result := GuidToString(G);
-  }
+  { create GUID: TGUID.New                        }
   { create GUID in Delphi IDE: press Shift+Ctrl+G }
-
   // in this API example we use a dummy GUID:
   result := '{00000000-0000-0000-0000-000000000000}';
-end;
-
-function TFormMain.GetRpcUrl: string;
-begin
-  if rbMainnet.IsChecked then
-    result := 'http://127.0.0.1:41320'
-  else if rbTestnet.IsChecked then
-    result := 'http://127.0.0.1:41420'
-  else
-    raise Exception.Create('Select Testnet or Mainnet first');
 end;
 
 function TFormMain.GetAttributeHash: string;
@@ -87,70 +68,77 @@ begin
   if s.IsEmpty then
     result := '' // not the hash of ''
   else
-    with TIdHashMessageDigest5.Create do
-    try
-      result := HashStringAsHex(s);
-    finally
-      Free;
-    end;
-end;
-
-function TFormMain.GetFileHash: string;
-var LHasher: TIdHashMessageDigest5;
-    LStream: TFileStream;
-begin
-  LHasher := TIdHashMessageDigest5.Create;
-  LStream := TFileStream.Create(edFileName.Text, fmOpenRead or fmShareDenyWrite);
-  try
-    result := LHasher.HashStreamAsHex(LStream);
-  finally
-    LStream.Free;
-    LHasher.Free;
-  end;
+    result := THashSHA2.GetHashString(s, SHA256);
 end;
 
 procedure TFormMain.FormCreate(Sender: TObject);
 begin
-  { TODO : enter RPC User and password from dms.conf }
-  RpcUser := '';     // dms.conf: rpcuser
-  RpcPW := '';       // dms.conf: rpcpassword
+//
+end;
+
+function TFormMain.CheckConfiguration: boolean;
+var LConf: TWalletConfiguration;
+    LFileName: string;
+begin
+  if rbTestnetWeb.IsChecked or rbMainnetWeb.IsChecked  then
+    exit(true);
+  // check local wallet: dms.conf
+  LConf := TWalletConfiguration.CreateNew(true);
+  // wallet does not seem to be configured for RPC
+  if LConf.rpcuser.IsEmpty or LConf.rpcpassword.IsEmpty then begin
+    if TDialogServiceSync.MessageDialog('Should DMS Core be configured for RPC access?',
+              TMsgDlgType.mtConfirmation, [TMsgDlgBtn.mbYes, TMsgDlgBtn.mbNo], TMsgDlgBtn.mbYes, 0) = mrNo
+    then
+      exit(true);
+    // create/update dms.conf
+    result := false; // wallet restart requied
+    LFileName := LConf.ConfFileName;
+    with TStringList.Create do
+    try
+      if TFile.Exists(LFileName) then
+        LoadFromFile(LFileName);
+      Values['rpcuser'] := 'dmsrpcuser';
+      Values['rpcpassword'] := 'dmsrpcpassword';
+      if Values['rpcallowip'].IsEmpty then
+        Values['rpcallowip'] := '127.0.0.1';
+      Values['server'] := '1';
+      SaveToFile(LFileName);
+    finally
+      Free;
+    end;
+    TDialogServiceSync.MessageDialog('Please restart DMS Core and then try again.',
+            TMsgDlgType.mtInformation, [TMsgDlgBtn.mbOk], TMsgDlgBtn.mbOk, 0);
+  end
+  else
+    result := true;
 end;
 
 procedure TFormMain.btnStoreClick(Sender: TObject);
 var LChain: TDocumentchain;
     LDoc  : TBlockchainDocument;
-    LHash,
+    LFileHash,
     LTxid : string;
 begin
-  if not TFile.Exists(edFileName.Text) then begin
-    if OpenDlg.Execute then
-      edFileName.Text := OpenDlg.FileName
-    else
-      exit;
-  end;
-  if not TFile.Exists(edFileName.Text) then
-    raise Exception.Create('File not found');
-  { dms.conf example:
-  rpcuser=dmsrpcuser
-  rpcpassword=gdbc6asdkHhd6F
-  rpcallowip=127.0.0.1
-  server=1
-  listen=1
-  daemon=1
-  }
-  LHash := GetFileHash;
-  lblFileHash.Text := 'Hash: ' + LHash;
+  if not CheckConfiguration then
+    exit;
+  if not OpenDlg.Execute then
+    exit;
+  edFileName.Text := OpenDlg.FileName;
+  LFileHash := THashSHA2.GetHashStringFromFile(edFileName.Text, SHA512);
+  lblFileHash.Text := 'Hash: ' + LFileHash;
   lblFileHash.Visible := true;
 
   LChain := TDocumentchain.Create(Self,
-                                  GetRpcUrl,
-                                  RpcUser,
-                                  RpcPW);
+                                  rbTestnetWeb.IsChecked or rbMainnetWeb.IsChecked,
+                                  rbTestnetWeb.IsChecked or rbTestnetLocal.IsChecked,
+                                  ''); // you need a WebAPI account to store in mainnet
   try
     LDoc.FillData(GetGUID,
-                  LHash,
+                  THashMD5.GetHashStringFromFile(edFileName.Text),
+                  LFileHash,
                   GetAttributeHash,
                   ''); // optional hash from publisher name
+
     LTxID := LChain.StoreDocumentInfo(LDoc);
     lblPleaseWait.Visible := true;
     { TODO : store transaction id with the document, i.e. in archive database }
@@ -164,31 +152,40 @@ procedure TFormMain.btnRevisionClick(Sender: TObject);
 var LChain: TDocumentchain;
     LDoc,                         // current local document
     LDocBC: TBlockchainDocument;  // document information on blockchain
-    LHash,
+    LFileHash,
     LTxid : string;
     LLog  : TStrings;
+    LRes  : TAuditStatus;
+    LMsgTp: TMsgDlgType;
 begin
   if not TFile.Exists(edFileName.Text) then
     raise Exception.Create('File not found');
-  LHash := GetFileHash;
-  lblFileHash.Text := 'Hash: ' + LHash;
+  LFileHash := THashSHA2.GetHashStringFromFile(edFileName.Text, SHA512);
+  lblFileHash.Text := 'Hash: ' + LFileHash;
   lblFileHash.Visible := true;
   LLog := TStringList.Create;
   // current document
   LChain := TDocumentchain.Create(Self,
-                                  GetRpcUrl,
-                                  RpcUser,
-                                  RpcPW);
+                                  rbTestnetWeb.IsChecked or rbMainnetWeb.IsChecked,
+                                  rbTestnetWeb.IsChecked or rbTestnetLocal.IsChecked,
+                                  'del'); // account not needed for revision
   try
     LDoc.FillData(GetGUID,
-                  GetFileHash,
+                  THashMD5.GetHashStringFromFile(edFileName.Text),
+                  LFileHash,
                   GetAttributeHash,
                   ''); // optional hash from publisher name
-    LTxID := edTxid.Text; { TODO : use the stored transaction id }
+    LTxID := edTxid.Text; { TODO : use transaction id stored in your archive database }
     LDocBC := LChain.GetDocument(LTxID);
     // compare the documents
-    TBlockchainDocument.CompareDocuments(LDoc, LDocBC, LLog, false);
-    ShowMessage(LLog.Text);
+    LRes := TBlockchainDocument.CompareDocuments(LDoc, LDocBC, LLog);
+    case LRes of
+      auditOk       : LMsgTp := TMsgDlgType.mtInformation;
+      auditHint     : LMsgTp := TMsgDlgType.mtWarning;
+      auditViolation: LMsgTp := TMsgDlgType.mtError;
+      else            LMsgTp := TMsgDlgType.mtError;
+    end;
+    TDialogServiceAsync.MessageDialog(LLog.Text, LMsgTp, [TMsgDlgBtn.mbOK], TMsgDlgBtn.mbOK, 0);
   finally
     LLog.Free;
     LChain.Free;

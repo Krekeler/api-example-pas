@@ -5,146 +5,146 @@ unit DMS.Api;
 interface
 
 uses
-  System.Classes, System.json, IdHTTP;
+  System.Classes, System.json, System.Net.HttpClient, System.Net.URLClient;
 
 const
-  cFeedStoreDocInfo = 0.1;  // Transaction fee
-  cDMSCoreExeName = 'dms-qt.exe';
+  cFeeStoreDocInfo = 0.1;   // blockchain transaction fee to store document hashes
+  cWebApiUrl = 'https://api.documentchain.org/'; // alternative server: 'https://api.dms.cash/'
 
 type
+  TWalletConfiguration = record   // local Wallet "DMS Core" configuration dms.conf
+  private
+    procedure LoadConf;
+  public
+    Testnet: boolean;
+    rpcuser,
+    rpcpassword,
+    rpcallowip: string;
+    function DataDir: string;
+    function ConfFileName: string;
+    class function CreateNew(ATestnet: boolean = false): TWalletConfiguration; static;
+  end;
+
   TAuditStatus = (auditUnknown,
                   auditOk,
                   auditHint,
                   auditViolation);
 
-  TTransaction = record
-    hex, txid, hash: string;
-    time, blocktime: TDateTime;
-  end;
-
-  TInfoRecord = record
-    version: string;
-    protocolversion: string;
-    blocks: string;
-    timeoffset: string;
-    connections: string;
-    proxy: string;
-    difficulty: string;
-    testnet: string;
-    paytxfee: string;
-    relayfee: string;
-  end;
-
-  TNetWorkInfoRecord = record
-    version: string;
-    subversion: string;
-    protocolversion: string;
-    localservices: string;
-    localrelay: string;
-    timeoffset: TDateTime;
-    connections: string;
-    relayfee: string;
-    warnings: string;
-  end;
-
-  TBlock = class(TObject)
-  public
-    ajson: string;
-    hash: string;
-    confirmations: integer;
-    strippedsize: integer;
-    size: integer;
-    weight: integer;
-    height: integer;
-    version: integer;
-    versionHex: string;
-    merkleroot: string;
-    transactions: tstringlist;
-    time, mediantime: TDateTime;
-    nonce: int64;
-    bits: string;
-    difficulty: extended;
-    chainwork: string;
-    previousblockhash, nextblockhash: string;
-  end;
-
-  TNewBlockEvent = procedure(const aBlock: TBlock) of object;
-  TBlockCountEvent = procedure(const aBlockCoun: cardinal) of object;
-
   TBlockchainDocument = record
   private
-    // blockchain Data
+    // Blockchain
     FTimeUTC,
     FBlockTimeUTC: TDateTime;
     FHeight,
     FConfirms: integer;
     FBlockHash: string;
-    // document data
+    // document
     FGUID,
-    FFileHashMD5,
-    FAttrHashMD5,
-    FPublisherHashMD5: string;
+    FIndexHashMD5,
+    FFileHashSHA512, // a secure file hash is required, the other hashes are optional
+    FAttrHashSHA256,
+    FOwnerHashSHA256: string;
     FDocDataHex  : string;
   public
-    Loaded: boolean;
-    procedure FillData(AGUID, AFileHashMD5, AAttrHashMD5, APublisherHashMD5: string); overload;
+    procedure FillData(const AGUID, AIndexHashMD5,
+                       AFileHashSHA512, AAttrHashSHA256, AOwnerHashSHA256: string); overload;
     procedure FillData(const AHex: string); overload;
     property GUID: string read FGUID;
-    property FileHashMD5: string read FFileHashMD5;
+    property IndexHashMD5: string read FIndexHashMD5;
     property BlockTimeUTC: TDateTime read FBlockTimeUTC;
     class function CompareDocuments(const ACurrDoc, AStoredDoc: TBlockchainDocument;
-                                    AResults: TStrings = nil; AMultiDocMode: boolean = false): TAuditStatus; static;
+                                    AResults: TStrings = nil): TAuditStatus; static;
+  end;
+
+  // local "DMS Core" or WebAPI
+  TCustomWallet = class(TObject)
+  private
+    FWinHTTP: THTTPClient;
+    FURL: string;  // 'http://127.0.0.1:8332' or 'https://api.dms.cash/'
+    FCmdGetinfo: string;
+    FCmdGetRawTx: string;
+    function GetValueFromJSON(const AJson, AValueName: string): string;
+    function GetResultFromJSON(const AJson: string): string;
+    function Post(const ACommand: string): string; virtual; abstract;
+    function GetRawTransaction(const ATxID: string): string;
+    function StoreDocumentInfo(const ADocInfo: TBlockchainDocument): string; virtual; abstract;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure GetInfo(ASL: TStrings);
+    property URL: string read FURL;
+  end;
+
+  TWalletDMSCore = class(TCustomWallet)
+  private
+    FRPCUser,
+    FRPCPassword: string;
+    const
+      cCmdGetinfo  = '{"jsonrpc": "1.0", "id":"DMSExposed", "method": "getinfo", "params": [] }';
+      cCmdGetRawTx = '{"jsonrpc": "1.0", "id":"DMSExposed", "method": "getrawtransaction", "params": ["%s",true] }';
+    function Post(const ACommand: string): string; override;
+    function StoreHex(const AHex: string; const AFee: real; const AMinConfirms: integer): string;
+    function StoreDocumentInfo(const ADocInfo: TBlockchainDocument): string; override;
+    procedure HTTPClientAuthEvent(const Sender: TObject; AnAuthTarget: TAuthTargetType; const ARealm,
+      AURL: string; var AUserName, APassword: string; var AbortAuth: Boolean; var Persistence: TAuthPersistenceType);
+  public
+    constructor Create(ATestnet: boolean = false);
+    destructor Destroy; override;
+  end;
+
+  TWalletWebAPI = class(TCustomWallet)
+  private
+    FTestnet: boolean;
+    FAccount: string; // account info to pay the fee, you need this in mainnet
+    const
+      cCmdGetinfo  = 'api=getinfo' + sLineBreak + 'id=DMSExposed';
+      cCmdGetRawTx = 'api=getrawtransaction' + sLineBreak + 'id=DMSExposed' + sLineBreak
+                   + 'tx=%s' + sLineBreak + 'verbose=1';
+    function Post(const ACommand: string): string; override;
+    function StoreDocumentInfo(const ADocInfo: TBlockchainDocument): string; override;
+  public
+    constructor Create(const AURL, AAccount: string; ATestnet: boolean);
+    destructor Destroy; override;
   end;
 
   TDocumentchain = class(TComponent)
   strict private
-    FOnReady: TNotifyEvent;
-    FOnNewBlock: TNewBlockEvent;
-    FOnBlockCount: TBlockCountEvent;
-    FHTTP: TIdHTTP;
-    FJSON: TJsonobject;
-    FURL: string;  // http://127.0.0.1:41320
-    function Post(const ACommand: string): string;
-    function GetResultFromJSON(const AJson: string): string;
-    function StoreHex(const AHex: string; const AFee: real; const AMinConfirms: integer): string;
+    FWallet: TCustomWallet;
     function FGetDocument(const ATxID: string): TBlockchainDocument;
   private
   public
-    constructor Create(Owner: TComponent; const AURL, ARPCUser, ARPCPassword: string);
+    constructor Create(Owner: TComponent; AUseWebAPI, ATestnet: boolean;
+                       const AAccount: string);
     destructor Destroy; override;
-    function GetJSon(ACommand: string): string;
-    function GetString(ACommand: string): string;
-    function GetBlockJSON(const aBlockHash: string): string;
-    function GetBlockHash(const ABlockNumber: integer): string;
-    function GetBlock(const ABlockHash: string): TBlock;
-    function GetInfo: TInfoRecord;
-    function GetDifficulty: string;
-    function GetNetworkInfo: TNetWorkInfoRecord;
-    function GetBlockCount: int64;
-    function GetRawTransaction(const ATxID: string; AVerbose: boolean = false): string;
-    function GetTransaction(const ATxID: string): TTransaction;
-    function StoreText(const AText: string; const AFee: real = cFeedStoreDocInfo; const AMinConfirms: integer = 6): string;
-    function StoreDocumentInfo(const ADocInfo: TBlockchainDocument;
-                               const AFee: real = cFeedStoreDocInfo; const AMinConfirms: integer = 6): string;
+    function IsWebAPI: boolean;
+    function StoreDocumentInfo(const ADocInfo: TBlockchainDocument): string;
     function GetDocument(const ATxID: string): TBlockchainDocument;
-    property OnReady: TNotifyEvent read FOnReady write FOnReady;
-    property OnNewBlock: TNewBlockEvent read FOnNewBlock write FOnNewBlock;
-    property OnBlockCount: TBlockCountEvent read FOnBlockCount write FOnBlockCount;
+    class function ValidTransactionID(const ATxID: string): boolean;
   end;
 
 implementation
 
 uses
-  System.SysUtils, Fmx.Forms, System.DateUtils, System.IOUtils, System.StrUtils,
-  Fmx.Dialogs;
+  Winapi.Windows{HKEY}, System.SysUtils, System.DateUtils, System.IOUtils, System.StrUtils,
+  System.Hash, System.Win.Registry, System.ZLib, System.UITypes, System.Generics.Collections,
+  FMX.DialogService.Async;
 
-const cDocMagicChars     = 'DM$';    // magic chars
+// https://github.com/Krekeler/documentchain/blob/master/dms-docs/document-revision-data.md
+const cDocMagicChars     = 'DM$';
       cDocMagicCharsHex  = '444D24';
-      cDocDataVersion    = 1;
-      cDocDataVersionHex = '0001';   // IntToHex(1)
-      cDocTypeAppHex     = '0099';   // app id
+      cDocDataVersion    = 2;
+      cDocDataVersionHex = '0002';
+      cDocTypeAppHex     = '0099'; // app id
+      cPrefixGUID        = '00';
+      cPrefixFile        = 'F0';
+      cPrefixAttr        = 'A0';
+      cPrefixOwner       = 'B0';
+      cPrefixMD5         = '00';
+      cPrefixSha256      = '22';
+      cPrefixSha512      = '25';
       cEmptyMD5Hash      = 'D41D8CD98F00B204E9800998ECF8427E';
-      cMaxInputAmount    = 21; // for safety do not take inputs with a higher balance
+      cEmptySHA256Hash   = 'E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855';
+      cMaxInputAmount    = 55; // do not take any inputs with a higher credit for safety reasons
       cRPCCommandFmt     = '{ "jsonrpc": "1.0", "id":"DMSExposed", "method": "%s", "params": [%s] }';
 
 function String2Hex(const AStr: string): string;
@@ -152,343 +152,196 @@ var r: RawByteString;
 begin
   r := UTF8Encode(AStr);
   SetLength(result, 2 * Length(r));
-  BinToHex(@r[1], PWideChar(result), Length(r)); // * SizeOf(AnsiChar));
+  BinToHex(@r[1], PWideChar(result), Length(r));
 end;
 
 function Hex2String(const AHex: string): string;
 var r: RawByteString;
 begin
   SetLength(r, Length(AHex) div 2);
-  HexToBin(PWideChar(AHex), r[1], Length(AHex)); // div SizeOf(AnsiChar));
+  HexToBin(PWideChar(AHex), r[1], Length(AHex));
   result := UTF8ToString(r);
 end;
 
-{ TBlockchainDocument }
-
-function CleanDataToken(const ASrc: string): string;
+function HashHexLength(const AAlgo: integer): integer;
 begin
-  result := ASrc.Trim;
-  result := result.Replace(#13#10, #10, [rfReplaceAll]);
-  result := result.Replace(#13, #10, [rfReplaceAll]);
-end;
-
-procedure TBlockchainDocument.FillData(AGUID, AFileHashMD5, AAttrHashMD5, APublisherHashMD5: string);
-begin
-  // check hash length
-  if AFileHashMD5.IsEmpty then
-    AFileHashMD5 := cEmptyMD5Hash;
-  if AFileHashMD5.Length <> 32 then
-    raise Exception.Create('Invalid FileHastMD5');
-  if AAttrHashMD5.IsEmpty then
-    AAttrHashMD5 := cEmptyMD5Hash;
-  if AAttrHashMD5.Length <> 32 then
-    raise Exception.Create('Invalid AttrHashMD5');
-  //
-  FGUID := AGUID;
-  FFileHashMD5 := AFileHashMD5;
-  FAttrHashMD5 := AAttrHashMD5;
-  FPublisherHashMD5 := IfThen(APublisherHashMD5<>cEmptyMD5Hash, APublisherHashMD5); // Hash or empty str
-  // res str
-  FDocDataHex := cDocMagicCharsHex
-               + cDocDataVersionHex
-               + cDocTypeAppHex
-               + FGUID.Replace('{', '').Replace('-', '', [rfReplaceAll]).Replace('}', '')
-               + FFileHashMD5
-               + FAttrHashMD5
-               + FPublisherHashMD5;
-end;
-
-{ Blockchain data strukt:
-  GUID (compressed), FileHashMD5 and AttrHashMD5 are already Hex data
-   0..5  : '444D24' = Hex 'DM$'
-   6..9  : '0001'   = Hex Blockchain Data Version 1
-  10..13 : '0099'   = Hex app id
-  14..45 : GUID (compressed)
-  46..77 : FileHashMD5
-  78..109: AttrHashMD5
-  ab 110 : PublisherHash or empty str }
-
-procedure TBlockchainDocument.FillData(const AHex: string);
-begin
-  FDocDataHex := AHex;
-  // must start with dm$ (lower case)
-  if not SameText(FDocDataHex.Substring(0, 6), cDocMagicCharsHex) then
-    raise Exception.Create('Invalid format');
-  // Blockchain Data Version...
-  if FDocDataHex.Substring(6, 4) <> cDocDataVersionHex then
-    raise Exception.Create('Unknown format version');
-  // GUID: 488ED27B79144F009C4E2806D57569FF => {488ED27B-7914-4F00-9C4E-2806D57569FF}
-  FGUID := '{' + FDocDataHex.Substring(14, 32) + '}';
-  FGUID := FGUID.Insert(9,  '-');
-  FGUID := FGUID.Insert(14, '-');
-  FGUID := FGUID.Insert(19, '-');
-  FGUID := FGUID.Insert(24, '-');
-  FGUID := FGUID.ToUpper;
-  StringToGUID(FGUID);
-  // hashes
-  FFileHashMD5 := FDocDataHex.Substring(46, 32).ToUpper;
-  FAttrHashMD5 := FDocDataHex.Substring(78, 32).ToUpper;
-  // publisher...
-  FPublisherHashMD5 := FDocDataHex.Substring(110, 32).ToUpper; // ca be empty
-end;
-
-class function TBlockchainDocument.CompareDocuments(const ACurrDoc, AStoredDoc: TBlockchainDocument;
-                                   AResults: TStrings = nil; AMultiDocMode: boolean = false): TAuditStatus;
-var LBlockTime: string;
-    LPublisherOk: boolean;
-begin
-  // Publisher war bis .548 als verschlüsselter Text gespeichert
-  // ab .549 (OM Data Version 2) wird nur der Hash veröffentlicht
-  LPublisherOk := (ACurrDoc.FPublisherHashMD5 = AStoredDoc.FPublisherHashMD5);
-  // alles unverändert...
-  if  (ACurrDoc.FGUID = AStoredDoc.FGUID)
-  and (ACurrDoc.FFileHashMD5 = AStoredDoc.FFileHashMD5)
-  and (ACurrDoc.FAttrHashMD5 = AStoredDoc.FAttrHashMD5)
-  and LPublisherOk
-  then
-    result := auditOk
-  else begin
-    if (ACurrDoc.FGUID <> AStoredDoc.FGUID)
-    or (ACurrDoc.FFileHashMD5 <> AStoredDoc.FFileHashMD5)
-    then
-      result := auditViolation
-    else
-      result := auditHint;
+  case AAlgo of
+     0:  result := 32;  // GUID/MD5
+     1:  result := 40;  // SHA1
+    21:  result := 56;  // SHA2-224
+    22:  result := 64;  // SHA2-256
+    23:  result := 96;  // SHA2-384
+    25:  result := 128; // SHA2-512
+    31:  result := 56;  // SHA3-224
+    32:  result := 64;  // SHA3-256
+    33:  result := 96;  // SHA3-384
+    35:  result := 128; // SHA3-512
+    else result := 0;
   end;
+end;
 
-  if Assigned(AResults) then begin
-    LBlockTime := DateTimeToStr(AStoredDoc.FBlockTimeUTC) + ' UTC'; // neu .544
-    // Ergebnis...
-    case result of
-      auditOk       : AResults.Add(Format('OK. The document has not been changed since %s', [LBlockTime]));
-      auditHint     : AResults.Add(Format('File OK, Attribute changed. The document file has not been changed since %s', [LBlockTime]));
-      auditViolation: AResults.Add('No confirmation! The document has been modified or it is another document.');
+{ TWalletConfiguration }
+
+class function TWalletConfiguration.CreateNew(ATestnet: boolean = false): TWalletConfiguration;
+begin
+  result.Testnet := ATestnet;
+  result.rpcuser := '';
+  result.rpcpassword := '';
+  result.rpcallowip := '127.0.0.1';
+  result.LoadConf;
+end;
+
+function TWalletConfiguration.DataDir: string;
+begin
+  with TRegistry.Create(KEY_READ) do
+  try
+    RootKey := HKEY_CURRENT_USER;
+    if OpenKeyReadOnly('Software\Krekeler\DMS-Qt') and ValueExists('strDataDir') then
+      result := ReadString('strDataDir');
+    Free;
+  except
+    Free;
+    result := '';
+  end;
+end;
+
+function TWalletConfiguration.ConfFileName: string;
+begin
+  result := DataDir;
+  if not result.IsEmpty then
+    result := TPath.Combine(result, 'dms.conf');
+end;
+
+procedure TWalletConfiguration.LoadConf;
+{read relevant data from dms.conf}
+var LFileName: string;
+begin
+  // read dms.conf
+  LFileName := ConfFileName;
+  if (not LFileName.IsEmpty) and TFile.Exists(LFileName) then
+    with TStringList.Create do
+    try
+      LoadFromFile(LFileName);
+      rpcuser     := Values['rpcuser'];
+      rpcpassword := Values['rpcpassword'];
+      rpcallowip  := Values['rpcallowip'];
+    finally
+      Free;
     end;
-    AResults.Add('Block timestamp: ' + LBlockTime);
-  end;
 end;
 
-{ TDocumentchain }
+{ TCustomWallet }
 
-constructor TDocumentchain.Create(Owner: TComponent; const AURL, ARPCUser, ARPCPassword: string);
+constructor TCustomWallet.Create;
 begin
-  inherited Create(Owner);
-  FURL := AURL;  // 'http://127.0.0.1:8332'
-  FHTTP := TIdHTTP.Create(self);
-  FHTTP.Request.Username := ARPCUser;
-  FHTTP.Request.Password := ARPCPassword;
-  FHTTP.Request.BasicAuthentication := true;
+  inherited;
+  FWinHTTP := THTTPClient.Create;
 end;
 
-destructor TDocumentchain.Destroy;
+destructor TCustomWallet.Destroy;
 begin
-  FHTTP.free;
+  FWinHTTP.Free;
   inherited;
 end;
 
-{***** RPC functions *****}
-
-function TDocumentchain.Post(const ACommand: string): string;
-var LJsonToSend: TStringStream;
+procedure TCustomWallet.GetInfo(ASL: TStrings);
+var LRes : string;
+    LJson: TJsonObject;
+    LObj : TJsonObject;
+    LPair: TJsonPair;
+    LVal : TJsonValue;
 begin
-  LJsonToSend := TStringStream.Create(ACommand);
+  LRes := Post(FCmdGetinfo);
+  LJson := TJsonObject.Create;
   try
-    result := FHTTP.Post(FURL, LJsonToSend);
+    if LJson.Parse(BytesOf(LRes), 0) > 0 then begin
+      LObj := LJson.GetValue('result') as TJsonObject;
+      if Assigned(LObj) then
+        for LPair in LObj do
+          ASL.Values[LPair.JsonString.ToString.Trim(['"'])] := LPair.JsonValue.ToString;
+      if Self is TWalletWebAPI then begin
+        LVal := LJson.GetValue('ver');
+        if Assigned(LVal) then
+          ASL.Values['webapiversion'] := LVal.ToString;
+        LVal := LJson.GetValue('url');
+        if Assigned(LVal) then
+          ASL.Values['url'] := LVal.ToString.Replace('\/', '/', [rfReplaceAll]);
+      end;
+    end;
   finally
-    LJsonToSend.Free;
+    LJson.free;
   end;
 end;
 
-function TDocumentchain.GetResultFromJSON(const AJson: string): string;
+function TCustomWallet.GetRawTransaction(const ATxID: string): string;
+begin
+  result := Post(Format(FCmdGetRawTx, [ATxID]));
+end;
+
+function TCustomWallet.GetValueFromJSON(const AJson, AValueName: string): string;
 begin
   with TJsonobject.Create do
   try
     if Parse(BytesOf(AJson), 0) > 0 then
-      result := GetValue<string>('result');
+      result := GetValue<string>(AValueName);
   finally
     Free;
   end;
 end;
 
-function TDocumentchain.GetJSon(ACommand: string): string;
-// ACommand Example: { "jsonrpc": "1.0", "id":"DMSExposed", "method": "getblockhash", "params": [10] }
+function TCustomWallet.GetResultFromJSON(const AJson: string): string;
 begin
-  result := Post(ACommand);
+  result := GetValueFromJSON(AJson, 'result');
 end;
 
-function TDocumentchain.GetString(ACommand: string): string;
-// ACommand Example: { "jsonrpc": "1.0", "id":"DMSExposed", "method": "getblockhash", "params": [10] }
+{ TWalletDMSCore }
+
+constructor TWalletDMSCore.Create(ATestnet: boolean = false);
+var LConf: TWalletConfiguration;
 begin
-  result := GetResultFromJSON(Post(ACommand));
+  inherited Create;
+  // load configuration from dms.conf
+  LConf := TWalletConfiguration.CreateNew(ATestnet);
+  FRPCUser := LConf.rpcuser;
+  FRPCPassword := LConf.rpcpassword;
+  FURL := 'http://127.0.0.1:' + IfThen(ATestnet, '41420', '41320');
+  { TODO : set RPC and URL if DMS Core is not located on local host }
+  FWinHTTP.AuthEvent := HTTPClientAuthEvent;
+  FCmdGetinfo := cCmdGetinfo;
+  FCmdGetRawTx := cCmdGetRawTx;
 end;
 
-function TDocumentchain.GetBlockHash(const ABlockNumber: integer): string;
+destructor TWalletDMSCore.Destroy;
 begin
-  result := GetResultFromJSON
-    (Post(Format
-    ('{"jsonrpc": "1.0", "id":"DMSExposed", "method": "getblockhash", "params": [%d] }',
-    [ABlockNumber])));
+  inherited;
 end;
 
-function TDocumentchain.GetBlock(const ABlockHash: string): TBlock;
-var
-  FJSON: TJsonobject;
-  json: string;
-  aa: tjsonvalue;
-  tx: TJSONArray;
-  en: TJSONArray.TEnumerator; // Delphi 10.2: TJSONArrayEnumerator;
+procedure TWalletDMSCore.HTTPClientAuthEvent(const Sender: TObject; AnAuthTarget: TAuthTargetType; const ARealm,
+  AURL: string; var AUserName, APassword: string; var AbortAuth: Boolean; var Persistence: TAuthPersistenceType);
 begin
-  json := Post
-    (Format('{"jsonrpc": "1.0", "id":"DMSExposed", "method": "getblock", "params": ["%s"] }',
-    [ABlockHash]));
-
-  result := TBlock.Create;
-
-  FJSON := TJsonobject.Create;
-  if FJSON.Parse(BytesOf(json), 0) > 0 then
-  begin
-    result.ajson := json;
-    aa := FJSON.GetValue('result');
-    result.hash := aa.GetValue<string>('hash');
-    result.confirmations := aa.GetValue<integer>('confirmations');
-    result.strippedsize := aa.GetValue<integer>('strippedsize');
-    result.size := aa.GetValue<integer>('size');
-    result.weight := aa.GetValue<integer>('weight');
-    result.height := aa.GetValue<integer>('height');
-    result.version := aa.GetValue<integer>('version');
-    result.versionHex := aa.GetValue<string>('versionHex');
-    result.merkleroot := aa.GetValue<string>('merkleroot');
-
-    // get transactions
-    result.transactions := tstringlist.Create;
-    tx := aa.GetValue<TJSONArray>('tx');
-    en := tx.GetEnumerator;
-    while en.MoveNext do
-    begin
-      result.transactions.Add(en.GetCurrent.ToString);
-    end;
-
-    result.time := UnixToDateTime(aa.GetValue<int64>('time'));
-    result.mediantime := UnixToDateTime(aa.GetValue<int64>('mediantime'));
-    result.nonce := aa.GetValue<int64>('nonce');
-    result.bits := aa.GetValue<string>('bits');
-    result.difficulty := aa.GetValue<extended>('difficulty');
-    result.chainwork := aa.GetValue<string>('chainwork');
-
-    // genesis block doesnt have prev
-    if result.height > 0 then
-      result.previousblockhash := aa.GetValue<string>('previousblockhash')
-    else
-      result.previousblockhash := '';
-
-    result.nextblockhash := aa.GetValue<string>('nextblockhash');
-  end;
-  FJSON.free;
+  AUserName := FRPCUser;
+  APassword := FRPCPassword;
 end;
 
-function TDocumentchain.GetBlockJSON(const ABlockHash: string): string;
+function TWalletDMSCore.Post(const ACommand: string): string;
+var LJsonToSend: TStringStream;
 begin
-  result := Post
-    (Format('{"jsonrpc": "1.0", "id":"DMSExposed", "method": "getblock", "params": ["%s"] }',
-    [ABlockHash]));
-end;
-
-function TDocumentchain.GetBlockCount: int64;
-begin
-  result := StrToInt
-    (GetResultFromJSON
-    (Post('{"jsonrpc": "1.0", "id":"DMSExposed", "method": "getblockcount", "params": [] }'))
-    );
-end;
-
-function TDocumentchain.GetDifficulty: string;
-begin
-  result := Post('{"jsonrpc": "1.0", "id":"DMSExposed", "method": "getdifficulty", "params": [] }')
-end;
-
-function TDocumentchain.GetInfo: TInfoRecord;
-var
-  ajson: string;
-  aa: tjsonvalue;
-begin
-  ajson := Post('{"jsonrpc": "1.0", "id":"DMSExposed", "method": "getinfo", "params": [] }');
-  FJSON := TJsonobject.Create;
+  LJsonToSend := TStringStream.Create(ACommand);
   try
-    if FJSON.Parse(BytesOf(ajson), 0) > 0 then begin
-      aa := FJSON.GetValue('result');
-      result.version := aa.GetValue<string>('version');
-      result.protocolversion := aa.GetValue<string>('protocolversion');
-      result.blocks := aa.GetValue<string>('blocks');
-      result.timeoffset := aa.GetValue<string>('timeoffset');
-      result.connections := aa.GetValue<string>('connections');
-      result.proxy := aa.GetValue<string>('proxy');
-      result.difficulty := aa.GetValue<string>('difficulty');
-      result.testnet := aa.GetValue<string>('testnet');
-      result.paytxfee := aa.GetValue<string>('paytxfee');
-      result.relayfee := aa.GetValue<string>('relayfee');
-    end;
+    result := FWinHTTP.Post(FURL, LJsonToSend).ContentAsString;
   finally
-    FJSON.free;
+    LJsonToSend.Free;
   end;
 end;
 
-function TDocumentchain.GetNetworkInfo: TNetWorkInfoRecord;
-var
-  ajson: string;
-  aa: tjsonvalue;
-begin
-  ajson := Post('{"jsonrpc": "1.0", "id":"DMSExposed", "method": "getnetworkinfo", "params": [] }');
-  FJSON := TJsonobject.Create;
-  try
-    if FJSON.Parse(BytesOf(ajson), 0) > 0 then begin
-      aa := FJSON.GetValue('result');
-      result.version := aa.GetValue<string>('version');
-      result.subversion := aa.GetValue<string>('subversion');
-      result.protocolversion := aa.GetValue<string>('protocolversion');
-      result.localservices := aa.GetValue<string>('localservices');
-      result.localrelay := aa.GetValue<string>('localrelay');
-      result.timeoffset := UnixToDateTime(aa.GetValue<int64>('timeoffset'));
-      result.connections := aa.GetValue<string>('connections');
-      result.relayfee := aa.GetValue<string>('relayfee');
-      result.warnings := aa.GetValue<string>('warnings');
-    end;
-  finally
-    FJSON.free;
-  end;
-end;
-
-function TDocumentchain.GetTransaction(const ATxID: string): TTransaction;
-var
-  LJson: string;
-  aa: tjsonvalue;
-begin
-  LJson := GetRawTransaction(ATxID);
-  try
-    FJSON := TJsonobject.Create;
-    if FJSON.Parse(BytesOf(LJson), 0) > 0 then begin
-      aa := FJSON.GetValue('result');
-      result.time := UnixToDateTime(aa.GetValue<int64>('time'));
-      result.blocktime := UnixToDateTime(aa.GetValue<int64>('blocktime'));
-    end;
-  finally
-    FJSON.free;
-  end;
-end;
-
-function TDocumentchain.GetRawTransaction(const ATxID: string; AVerbose: boolean = false): string;
-begin
-  result := Post(
-       Format('{"jsonrpc": "1.0", "id":"DMSExposed", "method": "getrawtransaction", "params": ["%s",%s] }',
-              [ATxID, BoolToStr(AVerbose,true).ToLower]));
-end;
-
-function TDocumentchain.StoreHex(const AHex: string; const AFee: real; const AMinConfirms: integer): string;
+function TWalletDMSCore.StoreHex(const AHex: string; const AFee: real; const AMinConfirms: integer): string;
 var i,
+    LTmpConfirms,
     LVout: integer;
     LChange: boolean;
     LMinMax,
     LTmpAmount,
-    LInputAmount: real;
+    LInputAmount: double;
     s,
     LChangeAdr,
     LChangeStr,
@@ -499,23 +352,26 @@ var i,
     LTx  : TJsonObject;
     LJSAr: TJsonArray;
 begin
+  // 1. get input to pay the fee
   s := Post('{"jsonrpc":"1.0","id":"DMSExposed","method":"listunspent"}');
   LTxid := '';
   LVout := -1;
   LInputAmount := -1;
   result := '';
   LJson := TJSONObject.ParseJSONValue(TEncoding.ASCII.GetBytes(s),0) as TJSONObject;
+  if not Assigned(LJson) then // s = ''
+    raise Exception.Create('No data received from wallet.');
   try
     LJSAr := TJSONArray(LJson.Get('result').JsonValue);
-    // search input
     LMinMax := 21000000;
     for i:=0 to LJSAr.Count-1 do begin
-      LTx := TJSONObject(LJSAr.Get(i));
+      LTx := TJSONObject(LJSAr.Items[i]);
+      LTmpConfirms := LTx.GetValue<integer>('confirmations');
       LTmpAmount := LTx.GetValue<real>('amount');
       if  (LTx.GetValue<boolean>('spendable') = true)
-      and (LTx.GetValue<integer>('confirmations') >= AMinConfirms)
+      and (LTmpConfirms >= AMinConfirms)
       and (LTmpAmount >= AFee)
-      and (LTmpAmount <= cMaxInputAmount)  // vorerst Sicherheitswert für max. Guthaben
+      and (LTmpAmount <= cMaxInputAmount)
       and (LTmpAmount <  LMinMax)
       then begin
         LTxid := LTx.GetValue<string>('txid');
@@ -528,9 +384,9 @@ begin
     LJson.Free;
   end;
   if LTxid.IsEmpty then
-    raise Exception.CreateHelp('No matching input found.', 2719);
+    raise Exception.Create('No matching input found.');
 
-  // change amount
+  // 2. change
   LChange := (LInputAmount - AFee) > (AFee / 100);
   if LChange then begin
     LChangeAdr := Post('{"jsonrpc":"1.0","id":"DMSExposed","method":"getrawchangeaddress"}');
@@ -541,19 +397,14 @@ begin
   else
     LChangeStr := '';
 
-  // CreateRawTransaction...
+  // 3. create raw transaction
   LTrans := Post('{"jsonrpc":"1.0","id":"DMSExposed","method":"createrawtransaction","params":'
                 + Format('[ [{"txid":"%s","vout":%d}], {%s"data":"%s"} ] }',
                          [LTxid, LVout, LChangeStr, AHex]));
   // {"result":"02000000019d0150631f8ce5cb8ac8781baf1ffb7994e50cad50906717cccdd82325937ef60000000000ffffffff0100000000000000000c6a0a48616c6c6f2057656c7400000000","error":null,"id":"DMSExposed"}
   LTrans := GetResultFromJSON(LTrans);
 
-  (* Debug
-  s := Post(Format('{"jsonrpc":"1.0","id":"DMSExposed","method":"decoderawtransaction","params":["%s"]}', [LTrans]));
-  ShowMessage(s);
-  *)
-
-  // sign
+  // 4. sign
   s := Post(Format('{"jsonrpc":"1.0","id":"DMSExposed","method":"signrawtransaction","params":["%s"]}', [LTrans]));
   // {"result":{"hex":"02000000019d0 .. 000000","complete":true},"error":null,"id":"DMSExposed"}
   LJson := TJSONObject.ParseJSONValue(TEncoding.ASCII.GetBytes(s),0) as TJSONObject;
@@ -566,29 +417,217 @@ begin
     LJson.Free;
   end;
 
-  // send...
+  // 5. send transaction
   LTrans := Post(Format('{"jsonrpc":"1.0","id":"DMSExposed","method":"sendrawtransaction","params":["%s"]}', [LTrans]));
   LTrans := GetResultFromJSON(LTrans);
-  result := LTrans; // the txid
+  result := LTrans; // tx id
 end;
 
-function TDocumentchain.StoreText(const AText: string;
-                                  const AFee: real = cFeedStoreDocInfo; const AMinConfirms: integer = 6): string;
-begin
-  result := StoreHex(String2Hex(AText), AFee, AMinConfirms);
-end;
-
-function TDocumentchain.StoreDocumentInfo(const ADocInfo: TBlockchainDocument;
-                                          const AFee: real = cFeedStoreDocInfo; const AMinConfirms: integer = 6): string;
+function TWalletDMSCore.StoreDocumentInfo(const ADocInfo: TBlockchainDocument): string;
 begin
   try
-    result := StoreHex(ADocInfo.FDocDataHex, AFee, AMinConfirms);
-  except  // Wallet DMS Core running? Start it
-    raise;
+    result := StoreHex(ADocInfo.FDocDataHex, cFeeStoreDocInfo, 6);
+  except
+    on E:Exception do begin
+      if (E.Message.Contains('10061') or E.Message.Contains('500 Internal Server Error'))
+      then
+        TDialogServiceAsync.MessageDialog('Please start DMS Core and unlock it if necessary.',
+                                          TMsgDlgType.mtWarning, [TMsgDlgBtn.mbOK], TMsgDlgBtn.mbOK, 0)
+      else
+        raise;
+    end;
   end;
 end;
 
+{ TWalletWebAPI }
+
+constructor TWalletWebAPI.Create(const AURL, AAccount: string; ATestnet: boolean);
+begin
+  inherited Create;
+  FURL := AURL;
+  FAccount := AAccount;
+  FTestnet := ATestnet;
+  FCmdGetinfo := cCmdGetinfo;
+  FCmdGetRawTx := cCmdGetRawTx;
+end;
+
+destructor TWalletWebAPI.Destroy;
+begin
+
+  inherited;
+end;
+
+function TWalletWebAPI.Post(const ACommand: string): string;
+var LParams: TStrings;
+begin
+  LParams := TStringList.Create;
+  try
+    LParams.Text := ACommand;
+    LParams.Values['account'] := FAccount;
+    if FTestnet then
+      LParams.Values['testnet'] := '1';
+    result := FWinHTTP.Post(FURL, LParams).ContentAsString;
+  finally
+    LParams.Free;
+  end;
+end;
+
+function TWalletWebAPI.StoreDocumentInfo(const ADocInfo: TBlockchainDocument): string;
+var LParams: TStrings;
+begin
+  LParams := TStringList.Create;
+  try
+    LParams.Values['api']  := 'post';
+    LParams.Values['raw']:= ADocInfo.FDocDataHex;
+    LParams.Values['account'] := FAccount;
+    if FTestnet then
+      LParams.Values['testnet'] := '1';
+    result := FWinHTTP.Post(FURL, LParams).ContentAsString;
+    result := GetValueFromJSON(result, 'txid');
+  finally
+    LParams.Free;
+  end;
+end;
+
+{ TBlockchainDocument }
+
+function CleanDataToken(const ASrc: string): string;
+{trim, replace #13#10 with #10 ...}
+begin
+  result := ASrc.Trim;
+  result := result.Replace(#13#10, #10, [rfReplaceAll]);
+  result := result.Replace(#13, #10, [rfReplaceAll]);
+end;
+
+procedure TBlockchainDocument.FillData(const AGUID, AIndexHashMD5,
+                                       AFileHashSHA512, AAttrHashSHA256, AOwnerHashSHA256: string);
+begin
+  // a secure file hash is required, guid and the other hashes are optional
+  FGUID := AGUID;
+  FIndexHashMD5    := IfThen(not SameText(AIndexHashMD5,   cEmptyMD5Hash), AIndexHashMD5).ToUpper;
+  FFileHashSHA512  := IfThen(not SameText(AFileHashSHA512, THashSHA2.GetHashString('', SHA512)), AFileHashSHA512).ToUpper;
+  FAttrHashSHA256  := IfThen(not SameText(AAttrHashSHA256, cEmptySHA256Hash), AAttrHashSHA256).ToUpper;
+  FOwnerHashSHA256 := IfThen(not SameText(AOwnerHashSHA256,cEmptySHA256Hash), AOwnerHashSHA256).ToUpper;
+  // serialize
+  FDocDataHex := cDocMagicCharsHex
+               + cDocDataVersionHex
+               + cDocTypeAppHex
+               + IfThen(not FGUID.IsEmpty,
+                   cPrefixGUID + cPrefixMD5 + FGUID.Replace('{', '').Replace('-', '', [rfReplaceAll]).Replace('}', ''))
+               + IfThen(not FIndexHashMD5.IsEmpty,   // short index hash
+                   cPrefixFile + cPrefixMD5 + FIndexHashMD5)
+               + IfThen(not FFileHashSHA512.IsEmpty, // secure file hash
+                   cPrefixFile + cPrefixSha512 + FFileHashSHA512)
+               + IfThen(not FAttrHashSHA256.IsEmpty,
+                   cPrefixAttr + cPrefixSHA256 + FAttrHashSHA256)
+               + IfThen(not FOwnerHashSHA256.IsEmpty,
+                   cPrefixOwner + cPrefixSHA256 + FOwnerHashSHA256);
+end;
+
+procedure TBlockchainDocument.FillData(const AHex: string); // Value is Hex/Base64 from Blockchain
+{https://github.com/Krekeler/documentchain/blob/master/dms-docs/document-revision-data.md}
+begin
+  FDocDataHex := AHex.ToUpper;
+  FGUID := '';
+  FIndexHashMD5 := '';
+  FFileHashSHA512 := '';
+  FAttrHashSHA256 := '';
+  FOwnerHashSHA256 := '';
+  // magic chars
+  if not SameText(FDocDataHex.Substring(0, 6), cDocMagicCharsHex) then
+    raise Exception.Create('Data cannot be converted, wrong format.');
+  // Blockchain Data Version
+  // "0001"= Revision v1, not considered in this example
+  // "0002"= Revision v2
+  if FDocDataHex.Substring(6, 4) <> '0002' then
+    raise Exception.Create('Unknown data version.');
+  // deserialize
+  var idx: integer := 14;
+  var i  : integer := 0;
+  var htype: char;
+  var halgo: string;
+  var hash : string;
+  while (idx < FDocDataHex.Length) do begin
+    inc(i); // wrong data could cause an endless loop
+    if (i > 19) then
+      raise Exception.Create('Invalid hash data');
+    htype := FDocDataHex.Chars[idx];
+    halgo := FDocDataHex.Substring(idx+2, 2);
+    hash  := FDocDataHex.Substring(idx+4, HashHexLength(halgo.ToInteger));
+    idx   := idx + 4 + HashHexLength(halgo.ToInteger);
+    case htype of
+      '0': FGUID := hash;
+      'F': if halgo = cPrefixMD5 then
+             FIndexHashMD5 := hash
+           else if halgo = cPrefixSha512 then
+             FFileHashSHA512 := hash;
+      'A': FAttrHashSHA256 := hash;
+      'B': FOwnerHashSHA256 := hash;
+    end;
+  end;
+  // GUID...
+  FGUID := '{' + FGUID + '}';
+  FGUID := FGUID.Insert(9,  '-');
+  FGUID := FGUID.Insert(14, '-');
+  FGUID := FGUID.Insert(19, '-');
+  FGUID := FGUID.Insert(24, '-');
+  StringToGUID(FGUID); // assert
+end;
+
+class function TBlockchainDocument.CompareDocuments(const ACurrDoc, AStoredDoc: TBlockchainDocument;
+                                   AResults: TStrings = nil): TAuditStatus;
+var LBlockTime: string;
+begin
+  if  (ACurrDoc.FGUID = AStoredDoc.FGUID)
+  and (ACurrDoc.FFileHashSHA512 = AStoredDoc.FFileHashSHA512)
+  and (ACurrDoc.FAttrHashSHA256 = AStoredDoc.FAttrHashSHA256)
+  and (AStoredDoc.FOwnerHashSHA256 = AStoredDoc.FOwnerHashSHA256)
+  then
+    result := auditOk
+  else begin
+    if (ACurrDoc.FGUID <> AStoredDoc.FGUID)
+    or (ACurrDoc.FFileHashSHA512 <> AStoredDoc.FFileHashSHA512)
+    then
+      result := auditViolation
+    else
+      result := auditHint;
+  end;
+
+  if Assigned(AResults) then begin
+    LBlockTime := DateTimeToStr(AStoredDoc.FBlockTimeUTC) + ' UTC';
+    case result of
+      auditOk       : AResults.Add(Format('OK. The document has not been changed since %s', [LBlockTime]));
+      auditHint     : AResults.Add(Format('File OK, Attribute changed. The document file has not been changed since %s',
+                                          [LBlockTime]));
+      auditViolation: AResults.Add('No confirmation! The document has been modified or it is another document.');
+    end;
+    AResults.Add('');
+    AResults.Add('Block Timestamp: ' + LBlockTime);
+  end;
+end;
+
+{ TDocumentchain }
+
+constructor TDocumentchain.Create(Owner: TComponent; AUseWebAPI, ATestnet: boolean;
+                                  const AAccount: string);
+begin
+  inherited Create(Owner);
+  if AUseWebAPI then
+    FWallet := TWalletWebAPI.Create(cWebApiUrl, AAccount, ATestnet)
+  else
+    FWallet := TWalletDMSCore.Create(ATestnet);
+end;
+
+destructor TDocumentchain.Destroy;
+begin
+  FWallet.Free;
+  inherited;
+end;
+
 function TDocumentchain.FGetDocument(const ATxID: string): TBlockchainDocument;
+{read document from blockchain}
+const cErrorTx = 'Document data could not be loaded from blockchain. Wrong transaction ID '
+               + 'or the block has not been confirmed (mined) yet.';
 var i: integer;
     s,
     LRawTx: string;
@@ -596,25 +635,25 @@ var i: integer;
     LJson2: TJsonObject;
     LJSAr : TJsonArray;
 begin
-  result.Loaded := false;
-  LRawTx := GetRawTransaction(ATxID, true);
+  LRawTx := FWallet.GetRawTransaction(ATxID);
+  if LRawTx.IsEmpty then
+    raise Exception.Create(cErrorTx);
   LJson := TJSONObject.ParseJSONValue(TEncoding.ASCII.GetBytes(LRawTx),0) as TJSONObject;
   try
-    LJson2 := LJSon.GetValue('result') as TJsonObject;
-    // Blockdaten...
     try
+      LJson2 := LJson.GetValue('result') as TJsonObject;
       result.FConfirms := LJson2.GetValue<integer>('confirmations');
     except
-      raise Exception.Create('Wrong transaction ID or block has not yet been mined.');
+      raise Exception.Create(cErrorTx);
     end;
     result.FTimeUTC := UnixToDateTime(LJson2.GetValue<int64>('time'));
     result.FBlockTimeUTC := UnixToDateTime(LJson2.GetValue<int64>('blocktime'));
     result.FHeight := LJson2.GetValue<integer>('height');
     result.FBlockHash := LJson2.GetValue<string>('blockhash');
-    // vout mit den Document-Daten suchen...
+    // search vout
     LJSAr := TJSONArray(LJson2.Get('vout').JsonValue);
     for i:=0 to LJSAr.Count-1 do begin
-      LJson2 := TJsonObject(LJSAr.Get(i));   // .Items[i]
+      LJson2 := TJsonObject(LJSAr.Items[i]);
       // {"value": 0.00000000,"valueSat": 0,"n": 1,"scriptPubKey": {"asm": "OP_RETURN 48616c6c6f2057656c74","hex": "6a0a48616c6c6f2057656c74","type": "nulldata"}}
       if LJson2.Values['scriptPubKey'] = nil then
         Continue;
@@ -625,7 +664,6 @@ begin
         if s.StartsWith('OP_RETURN ') then begin
           s := s.Remove(0, 10);
           result.FillData(s);
-          result.Loaded := true;
           break;
         end;
       end;
@@ -639,9 +677,33 @@ function TDocumentchain.GetDocument(const ATxID: string): TBlockchainDocument;
 begin
   try
     result := FGetDocument(ATxID);
-  except  // Wallet DMS Core running? Start it
-    raise;
+  except
+    on E:Exception do begin
+      if  (FWallet is TWalletDMSCore)
+      and (E.Message.Contains('10061') or E.Message.Contains('500 Internal Server Error'))
+      then
+        TDialogServiceAsync.MessageDialog('Please start DMS Core and unlock it if necessary.',
+                                          TMsgDlgType.mtWarning, [TMsgDlgBtn.mbOK], TMsgDlgBtn.mbOK, 0)
+      else
+        raise;
+    end;
   end;
+end;
+
+function TDocumentchain.IsWebAPI: boolean;
+begin
+  result := FWallet is TWalletWebAPI;
+end;
+
+function TDocumentchain.StoreDocumentInfo(const ADocInfo: TBlockchainDocument): string;
+begin
+  result := FWallet.StoreDocumentInfo(ADocInfo);
+end;
+
+class function TDocumentchain.ValidTransactionID(const ATxID: string): boolean;
+{256 bit, 32 byte, 64 chars as Hex}
+begin
+  result := ATxID.Length = 64;
 end;
 
 end.
