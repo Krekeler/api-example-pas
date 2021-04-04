@@ -463,6 +463,8 @@ end;
 
 function TWalletWebAPI.StoreDocumentInfo(const ADocInfo: TBlockchainDocument): string;
 var LParams: TStrings;
+    LResponse,
+    LErr: string;
 begin
   LParams := TStringList.Create;
   try
@@ -471,10 +473,22 @@ begin
     LParams.Values['account'] := FAccount;
     if FTestnet then
       LParams.Values['testnet'] := '1';
-    result := FWinHTTP.Post(FURL, LParams).ContentAsString;
-    result := GetValueFromJSON(result, 'txid');
+    LResponse := FWinHTTP.Post(FURL, LParams).ContentAsString;
   finally
     LParams.Free;
+  end;
+  try
+    result := GetValueFromJSON(LResponse, 'txid'); // exception if not included
+    if result.IsEmpty then                         // exception if empty
+      raise Exception.Create('Transaction ID is empty.');
+  except
+    on E:Exception do begin
+      // show error message from API server, like "account required to post a document in mainnet"
+      LErr := GetValueFromJSON(LResponse, 'err');
+      raise Exception.Create('Document hashes could not be stored.'
+                           + sLineBreak + E.Message
+                           + IfThen(not LErr.IsEmpty, sLineBreak+sLineBreak + 'Server message:' + sLineBreak + LErr));
+    end;
   end;
 end;
 
