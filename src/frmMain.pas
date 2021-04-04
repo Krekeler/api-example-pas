@@ -1,4 +1,6 @@
 { Documentchain (DMS Core) Example Code https://documentchain.org}
+{ Please do not hesitate to contact us if you have any questions }
+{ mail@documentchain.org, https://documentchain.org/legal-notice/}
 
 unit frmMain;
 
@@ -27,7 +29,6 @@ type
     rbMainnetLocal: TRadioButton;
     procedure btnStoreClick(Sender: TObject);
     procedure btnRevisionClick(Sender: TObject);
-    procedure FormCreate(Sender: TObject);
   private
     function GetAttributeHash: string;
     function CheckConfiguration: boolean;
@@ -69,11 +70,6 @@ begin
     result := '' // not the hash of ''
   else
     result := THashSHA2.GetHashString(s, SHA256);
-end;
-
-procedure TFormMain.FormCreate(Sender: TObject);
-begin
-//
 end;
 
 function TFormMain.CheckConfiguration: boolean;
@@ -168,7 +164,7 @@ begin
   LChain := TDocumentchain.Create(Self,
                                   rbTestnetWeb.IsChecked or rbMainnetWeb.IsChecked,
                                   rbTestnetWeb.IsChecked or rbTestnetLocal.IsChecked,
-                                  'del'); // account not needed for revision
+                                  ''); // account not needed for revision
   try
     LDoc.FillData(GetGUID,
                   THashMD5.GetHashStringFromFile(edFileName.Text),

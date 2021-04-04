@@ -1,4 +1,6 @@
 { Documentchain (DMS Core) Example Code https://documentchain.org}
+{ Please do not hesitate to contact us if you have any questions }
+{ mail@documentchain.org, https://documentchain.org/legal-notice/}
 
 unit DMS.Api;
 
@@ -9,7 +11,7 @@ uses
 
 const
   cFeeStoreDocInfo = 0.1;   // blockchain transaction fee to store document hashes
-  cWebApiUrl = 'https://api.documentchain.org/'; // alternative server: 'https://api.dms.cash/'
+  cWebApiUrl = 'https://api.dms.cash/';
 
 type
   TWalletConfiguration = record   // local Wallet "DMS Core" configuration dms.conf
@@ -89,13 +91,12 @@ type
       AURL: string; var AUserName, APassword: string; var AbortAuth: Boolean; var Persistence: TAuthPersistenceType);
   public
     constructor Create(ATestnet: boolean = false);
-    destructor Destroy; override;
   end;
 
   TWalletWebAPI = class(TCustomWallet)
   private
     FTestnet: boolean;
-    FAccount: string; // account info to pay the fee, you need this in mainnet
+    FAccount: string; // account info to pay the fee, you need this in mainnet, ask mail@documentchain.org
     const
       cCmdGetinfo  = 'api=getinfo' + sLineBreak + 'id=DMSExposed';
       cCmdGetRawTx = 'api=getrawtransaction' + sLineBreak + 'id=DMSExposed' + sLineBreak
@@ -104,7 +105,6 @@ type
     function StoreDocumentInfo(const ADocInfo: TBlockchainDocument): string; override;
   public
     constructor Create(const AURL, AAccount: string; ATestnet: boolean);
-    destructor Destroy; override;
   end;
 
   TDocumentchain = class(TComponent)
@@ -305,15 +305,10 @@ begin
   FRPCUser := LConf.rpcuser;
   FRPCPassword := LConf.rpcpassword;
   FURL := 'http://127.0.0.1:' + IfThen(ATestnet, '41420', '41320');
-  { TODO : set RPC and URL if DMS Core is not located on local host }
+  { TODO : set RPC and URL if wallet "DMS Core" is not located on local host }
   FWinHTTP.AuthEvent := HTTPClientAuthEvent;
   FCmdGetinfo := cCmdGetinfo;
   FCmdGetRawTx := cCmdGetRawTx;
-end;
-
-destructor TWalletDMSCore.Destroy;
-begin
-  inherited;
 end;
 
 procedure TWalletDMSCore.HTTPClientAuthEvent(const Sender: TObject; AnAuthTarget: TAuthTargetType; const ARealm,
@@ -411,7 +406,7 @@ begin
   try
     LJson2 := LJson.Values['result'] as TJSONObject;
     if LJson2.GetValue<boolean>('complete') = false then
-      raise Exception.Create('Signierung konnte nicht abgeschlossen werden.');
+      raise Exception.Create('Signing could not be completed.');
     LTrans := LJson2.GetValue<string>('hex');
   finally
     LJson.Free;
@@ -451,12 +446,6 @@ begin
   FCmdGetRawTx := cCmdGetRawTx;
 end;
 
-destructor TWalletWebAPI.Destroy;
-begin
-
-  inherited;
-end;
-
 function TWalletWebAPI.Post(const ACommand: string): string;
 var LParams: TStrings;
 begin
@@ -477,8 +466,8 @@ var LParams: TStrings;
 begin
   LParams := TStringList.Create;
   try
-    LParams.Values['api']  := 'post';
-    LParams.Values['raw']:= ADocInfo.FDocDataHex;
+    LParams.Values['api'] := 'post';
+    LParams.Values['raw'] := ADocInfo.FDocDataHex;
     LParams.Values['account'] := FAccount;
     if FTestnet then
       LParams.Values['testnet'] := '1';
@@ -492,7 +481,7 @@ end;
 { TBlockchainDocument }
 
 function CleanDataToken(const ASrc: string): string;
-{trim, replace #13#10 with #10 ...}
+{trim and store only LF line breaks}
 begin
   result := ASrc.Trim;
   result := result.Replace(#13#10, #10, [rfReplaceAll]);
@@ -597,6 +586,7 @@ begin
     LBlockTime := DateTimeToStr(AStoredDoc.FBlockTimeUTC) + ' UTC';
     case result of
       auditOk       : AResults.Add(Format('OK. The document has not been changed since %s', [LBlockTime]));
+      { TODO : In the final software, a certificate for the customer can be created here. }
       auditHint     : AResults.Add(Format('File OK, Attribute changed. The document file has not been changed since %s',
                                           [LBlockTime]));
       auditViolation: AResults.Add('No confirmation! The document has been modified or it is another document.');
